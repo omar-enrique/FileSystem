@@ -270,6 +270,88 @@ int pwd(MINODE *wd) {
     }
 }
 
+int my_open(char *file, int flags) {
+    MINODE *mip;
+    int ino = getino(file);
+    if(ino == 0) {
+        creat(file, 0077);
+        ino = getino(file);
+    }
+    mip = iget(dev, ino);
+
+    OFT *otable = (OFT *)malloc(sizeof(OFT *));
+
+    otable->mode = flags;
+    otable->minodePtr = mip;
+    otable->refCount = 1;
+    if(flags < 3)
+        otable->offset = 0;
+    else {
+        struct stat st;
+        stat(file, &st);
+        otable->offset = st.st_size;
+    }
+
+    for(int i = 0; i < NFD; i++) {
+        if(!running->fd[i]) {
+            running->fd[i] = &otable;
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int my_lseek(int fd, int position) {
+    OFT *temp = running->fd[fd];
+    if(position <0 || position > temp->minodePtr->INODE.i_size){
+		printf("Invalid position entered \n");
+		return 0;
+	}
+
+    temp->offset = position;
+    return 0;
+} 
+
+int myclose(int fd) {
+    OFT *temp = running->fd[fd];
+    if(running->fd[fd]) {
+        temp->refCount--;
+        if(temp->refCount == 0) {
+            iput(temp->minodePtr);
+        }
+    }
+
+    running->fd[fd] = 0;
+}
+
+int myread(int fd, char *buf, int nbytes) {
+    int countBytes = 0;
+    MINODE *mip;
+    int lblk = 0, start = 0;
+    char *buf;
+
+    if(!running->fd[fd]) {
+        printf("File not opened\n");
+        return 0;
+    }
+    mip = running->fd[fd]->minodePtr;
+    int offset = running->fd[fd]->offset;
+    int avil = mip->INODE.i_size - offset;
+
+    while(nbytes && avil) {
+        lblk = offset / BLKSIZE;
+        start = offset % BLKSIZE;
+
+        if(lblk < 12) {
+            get_block(dev, mip->INODE.i_block[lblk], buf);
+            
+        }
+    }
+
+    return countBytes;
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
