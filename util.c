@@ -80,28 +80,6 @@ int decFreeInodes(int dev)
   put_block(dev, 2, buf);
 }
 
-int ialloc(int dev)
-{
-  int  i;
-  char buf[BLKSIZE];
-
-  // read inode_bitmap block
-  get_block(dev, imap, buf);
-    printf("nINODES: %d, FREE INODES: %d\n", ninodes, freeinodes);
-  for (i=0; i < ninodes; i++){
-    if (tst_bit(buf, i)==0){
-       set_bit(buf,i);
-       decFreeInodes(dev);
-
-       put_block(dev, imap, buf);
-
-       return i+1;
-    }
-  }
-  printf("ialloc(): no more free inodes\n");
-  return 0;
-}
-
 int tokenize(char *pathname)
 {
     int i = 0;
@@ -118,31 +96,6 @@ int tokenize(char *pathname)
     n = i;
     return i;
 }
-
-int balloc(int dev)
-{
-    int i;
-    char buf[BLKSIZE];
-
-    // read inode_bitmap block
-    get_block(dev, bmap, buf);
-
-    for (i = 0; i < ninodes; i++)
-    {
-        if (tst_bit(buf, i) == 0)
-        {
-            set_bit(buf, i);
-            decFreeInodes(dev);
-
-            put_block(dev, bmap, buf);
-
-            return i + 1;
-        }
-    }
-    printf("balloc(): no more free blocks\n");
-    return 0;
-}
-
 
 int idealloc(int dev, int ino)
 {
@@ -201,10 +154,10 @@ int bdealloc(int dev, int bno)
     gp = (GD *)buf;
     gp->bg_free_blocks_count++;
     put_block(dev, 2, buf);
+    
+}
 
-<<<<<<< HEAD
-int ialloc(int dev)
-{
+    int ialloc(int dev){
     int i;
     char buf[BLKSIZE];
 
@@ -249,20 +202,13 @@ int balloc(int dev)
         }
     }
     printf("balloc(): no more free blocks\n");
-=======
->>>>>>> origin/omar
     return 0;
 }
 
 MINODE *iget(int dev, int ino)
 {
-<<<<<<< HEAD
-    MINODE *mip;
-    INODE *ip;
-=======
 	MINODE *mip = malloc(sizeof(MINODE));
     INODE *tempIP;
->>>>>>> origin/omar
 
     int blk, offset;
     char buf[BLKSIZE];
