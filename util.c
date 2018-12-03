@@ -24,18 +24,81 @@ int  nblocks, ninodes, bmap, imap, inode_start;
 char line[256], cmd[32], pathname[256];
 char cwd[256];
 
+int freeinodes, freeblocks;
 
-int get_block(int dev, int blk, char *buf)
+int get_block(int fd, int blk, char buf[ ])
 {
-    lseek(dev, (long)blk*BLKSIZE, 0);
-    read(dev, buf, BLKSIZE);
-}   
+  lseek(fd, (long)blk*BLKSIZE, 0);
+  read(fd, buf, BLKSIZE);
+}
 
-int put_block(int dev, int blk, char *buf)
+int put_block(int fd, int blk, char buf[ ])
 {
-    lseek(dev, (long)blk*BLKSIZE, 0);
-    write(dev, buf, BLKSIZE);
-}   
+  lseek(fd, (long)blk*BLKSIZE, 0);
+  write(fd, buf, BLKSIZE);
+}
+
+int tst_bit(char *buf, int bit)
+{
+  int i, j;
+  i = bit/8; j=bit%8;
+  if (buf[i] & (1 << j))
+     return 1;
+  return 0;
+}
+
+int set_bit(char *buf, int bit)
+{
+  int i, j;
+  i = bit/8; j=bit%8;
+  buf[i] |= (1 << j);
+}
+
+int clr_bit(char *buf, int bit)
+{
+  int i, j;
+  i = bit/8; j=bit%8;
+  buf[i] &= ~(1 << j);
+}
+
+
+int decFreeInodes(int dev)
+{
+  char buf[BLKSIZE];
+
+  // dec free inodes count in SUPER and GD
+  get_block(dev, 1, buf);
+  sp = (SUPER *)buf;
+  sp->s_free_inodes_count--;
+  put_block(dev, 1, buf);
+
+  get_block(dev, 2, buf);
+  gp = (GD *)buf;
+  gp->bg_free_inodes_count--;
+  put_block(dev, 2, buf);
+}
+
+int ialloc(int dev)
+{
+  int  i;
+  char buf[BLKSIZE];
+
+  // read inode_bitmap block
+  get_block(dev, imap, buf);
+    printf("nINODES: %d, FREE INODES: %d\n", ninodes, freeinodes);
+  for (i=0; i < ninodes; i++){
+    if (tst_bit(buf, i)==0){
+       set_bit(buf,i);
+       decFreeInodes(dev);
+
+       put_block(dev, imap, buf);
+
+       return i+1;
+    }
+  }
+  printf("ialloc(): no more free inodes\n");
+  return 0;
+}
 
 int tokenize(char *pathname)
 {
@@ -54,51 +117,95 @@ int tokenize(char *pathname)
     return i;
 }
 
-// tst_bit, set_bit functions
-int tst_bit(char *buf, int bit){
-    return buf[bit/8] & (1 << (bit % 8));
+int balloc(int dev)
+{
+    int i;
+    char buf[BLKSIZE];
+
+    // read inode_bitmap block
+    get_block(dev, bmap, buf);
+
+    for (i = 0; i < ninodes; i++)
+    {
+        if (tst_bit(buf, i) == 0)
+        {
+            set_bit(buf, i);
+            decFreeInodes(dev);
+
+            put_block(dev, bmap, buf);
+
+            return i + 1;
+        }
+    }
+    printf("balloc(): no more free blocks\n");
+    return 0;
 }
 
-int set_bit(char *buf, int bit){
-    buf[bit/8] |= (1 << (bit % 8));
-}
 
-int decFreeInodes(int dev)
+int idealloc(int dev, int ino)
 {
     char buf[1024];
-// dec free inodes count in SUPER and GD
-    get_block(dev, 1, buf);
-    sp = (SUPER *)buf;
-    sp->s_free_inodes_count--;
-    put_block(dev, 1, buf);
-    get_block(dev, 2, buf);
+    int byte;
+    int bit;
+
+    get_block(dev, imap, buf);
+
+    byte = ino / 8;
+    bit = ino % 8;
+
+    //negate it
+    buf[byte] &= ~(1 << bit);
+
+    put_block(dev, imap, buf); //built in function
+
+    //set free blocks
+    get_block(dev, 1, buf); //built in function
+    sp = (SUPER *)buf; //super block pointer
+    sp->s_free_blocks_count++; //pointer member, increase number of inodes since we have deallocated it
+    put_block(dev, 1, buf); //built in function, adds another block
+
+    get_block(dev, 2, buf); //same as above
     gp = (GD *)buf;
-    gp->bg_free_inodes_count--;
+    gp->bg_free_blocks_count++;
     put_block(dev, 2, buf);
 }
 
-int ialloc(int dev)
+//deallocate a block
+//once deallocated we also increment the number of free blocks, basically opposite of above function
+int bdealloc(int dev, int bno)
 {
-    // int i;
-    // char buf[BLKSIZE];
-    // // use imap, ninodes in mount table of dev
-    // MOUNT *mp = (MOUNT *)get_mtable(dev);
-    // get_block(dev, mp->imap, buf);
-    // for (i=0; i<mp->ninodes; i++){
-    //     if (tst_bit(buf, i)==0){
-    //         set_bit(buf, i);
-    //         put_block(dev, mp->imap, buf);
-    //         // update free inode count in SUPER and GD
-    //         decFreeInodes(dev);
-    //         return (i+1);
-    //     }
-    // }
-    return 0; // out of FREE inodes
+    char buf[1024];
+    int byte;
+    int bit;
+
+    //clear bit(bmap, bno)
+    get_block(dev, bmap, buf);
+
+    //mailmans from class
+    byte = bno / 8;
+    bit = bno % 8;
+
+    buf[byte] &= ~(1 << bit);
+
+    put_block(dev, bmap, buf); //built in function
+
+    //set free blocks
+    get_block(dev, 1, buf);
+    sp = (SUPER *)buf;
+    sp->s_free_blocks_count++;
+    put_block(dev, 1, buf);
+
+    get_block(dev, 2, buf);
+    gp = (GD *)buf;
+    gp->bg_free_blocks_count++;
+    put_block(dev, 2, buf);
+
+    return 0;
 }
 
 MINODE *iget(int dev, int ino)
 {
-    MINODE *mip;
+	MINODE *mip = malloc(sizeof(MINODE));
     INODE *tempIP;
 
     int blk, offset;
@@ -202,7 +309,7 @@ int search(MINODE *mip, char *name)
         }
     }
 
-    return 0;
+    return -1;
 }
 
 
@@ -228,14 +335,14 @@ int getino(char *pathname)
         if(!S_ISDIR(mip->INODE.i_mode)) {
             printf("%s is not a directory \n", name[i]);
             iput(mip);
-            return 0;
+            return -1;
         }
         ino = search(mip, name[i]);
         iput(mip);
 
         if (!ino) {
             printf("%s does not exist\n", name[i]);
-            return 0;
+            return -1;
         }
         
         mip = iget(dev, ino);

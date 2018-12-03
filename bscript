@@ -1,0 +1,6 @@
+#! /bin/bash
+   touch disk
+	mkfs disk 1440
+	mount -o loop disk /mnt
+	(cd /mnt; rm -r *; ls -l)
+	umount /mnt
