@@ -79,20 +79,20 @@ int decFreeInodes(int dev)
 
 int ialloc(int dev)
 {
-    int i;
-    char buf[BLKSIZE];
-    // use imap, ninodes in mount table of dev
-    MOUNT *mp = (MOUNT *)get_mtable(dev);
-    get_block(dev, mp->imap, buf);
-    for (i=0; i<mp->ninodes; i++){
-        if (tst_bit(buf, i)==0){
-            set_bit(buf, i);
-            put_block(dev, mp->imap, buf);
-            // update free inode count in SUPER and GD
-            decFreeInodes(dev);
-            return (i+1);
-        }
-    }
+    // int i;
+    // char buf[BLKSIZE];
+    // // use imap, ninodes in mount table of dev
+    // MOUNT *mp = (MOUNT *)get_mtable(dev);
+    // get_block(dev, mp->imap, buf);
+    // for (i=0; i<mp->ninodes; i++){
+    //     if (tst_bit(buf, i)==0){
+    //         set_bit(buf, i);
+    //         put_block(dev, mp->imap, buf);
+    //         // update free inode count in SUPER and GD
+    //         decFreeInodes(dev);
+    //         return (i+1);
+    //     }
+    // }
     return 0; // out of FREE inodes
 }
 

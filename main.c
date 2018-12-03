@@ -228,6 +228,7 @@ int rpwd(MINODE *wd) {
     }
 
     rpwd(pip);
+    printf("/%s", dirname);
 }
 
 int make_dir(char *pathname) {
