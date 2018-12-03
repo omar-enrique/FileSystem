@@ -329,7 +329,10 @@ int myread(int fd, char *buf, int nbytes) {
     int countBytes = 0;
     MINODE *mip;
     int lblk = 0, start = 0;
-    char *buf;
+    char *kbuf;
+    int remain = 0;
+    char *cp;
+    int *indirect;
 
     if(!running->fd[fd]) {
         printf("File not opened\n");
@@ -344,11 +347,69 @@ int myread(int fd, char *buf, int nbytes) {
         start = offset % BLKSIZE;
 
         if(lblk < 12) {
-            get_block(dev, mip->INODE.i_block[lblk], buf);
-            
+            get_block(dev, mip->INODE.i_block[lblk], kbuf);
+        }
+        else if(lblk < 12 + 256) {
+            get_block(dev, mip->INODE.i_block[12], indirect);
+            get_block(dev, indirect[lblk - 12], kbuf);
+        } 
+        
+        cp = kbuf + start;
+        remain = BLKSIZE - start;
+
+        while(remain) {
+            *buf++ = *cp++;
+            offset++; countBytes++;
+            remain--; avil--; nbytes--;
+            if(nbytes <= 0 || avil <= 0) 
+                break;
         }
     }
 
+    return countBytes;
+}
+
+int my_write(int fd, char *buf, int nbytes) {
+    int countBytes = 0;
+    int lblk = 0, start = 0;
+    int *indirect;
+    char *cp;
+    int remain;
+    char *kbuf;
+    int fileSize = 0;
+
+    if(!running->fd[fd]) {
+        printf("File not opened\n");
+        return 0;
+    }
+    MINODE *mip = running->fd[fd]->minodePtr;
+    int offset = running->fd[fd]->offset;
+    fileSize = mip->INODE.i_size;
+    while (nbytes) {
+        lblk = offset / BLKSIZE;
+        start = offset % BLKSIZE;
+
+        if(lblk < 12) {
+            get_block(dev, mip->INODE.i_block[lblk], kbuf);
+        }
+        else if(lblk < 12 + 256) {
+            get_block(dev, mip->INODE.i_block[12], indirect);
+            get_block(dev, indirect[lblk - 12], kbuf);
+        } 
+
+        cp = kbuf + start;
+        remain = BLKSIZE - start;
+
+        while(remain) {
+            *cp++ = *buf++;
+            offset++; countBytes++;
+            remain--; nbytes--;
+            if (offset > fileSize) fileSize++; 
+            if (nbytes <= 0) break;
+        }
+    }
+
+    mip->dirty  = 1;
     return countBytes;
 }
 
