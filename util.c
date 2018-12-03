@@ -79,27 +79,27 @@ int decFreeInodes(int dev)
 
 int ialloc(int dev)
 {
-    int i;
-    char buf[BLKSIZE];
-    // use imap, ninodes in mount table of dev
-    MOUNT *mp = (MOUNT *)get_mtable(dev);
-    get_block(dev, mp->imap, buf);
-    for (i=0; i<mp->ninodes; i++){
-        if (tst_bit(buf, i)==0){
-            set_bit(buf, i);
-            put_block(dev, mp->imap, buf);
-            // update free inode count in SUPER and GD
-            decFreeInodes(dev);
-            return (i+1);
-        }
-    }
+    // int i;
+    // char buf[BLKSIZE];
+    // // use imap, ninodes in mount table of dev
+    // MOUNT *mp = (MOUNT *)get_mtable(dev);
+    // get_block(dev, mp->imap, buf);
+    // for (i=0; i<mp->ninodes; i++){
+    //     if (tst_bit(buf, i)==0){
+    //         set_bit(buf, i);
+    //         put_block(dev, mp->imap, buf);
+    //         // update free inode count in SUPER and GD
+    //         decFreeInodes(dev);
+    //         return (i+1);
+    //     }
+    // }
     return 0; // out of FREE inodes
 }
 
 MINODE *iget(int dev, int ino)
 {
     MINODE *mip;
-    INODE *ip;
+    INODE *tempIP;
 
     int blk, offset;
     char buf[BLKSIZE];
@@ -144,8 +144,8 @@ MINODE *iget(int dev, int ino)
     printf("iget: ino=%d blk=%d offset=%d\n", ino, blk, offset);
 
     get_block(dev, blk, buf);
-    ip = (INODE *)buf + offset;
-    mip->INODE = *ip;  // copy INODE to mp->INODE
+    tempIP = (INODE *)buf + offset;
+    mip->INODE = *tempIP;  // copy INODE to mp->INODE
 
     return mip;
 }
@@ -153,7 +153,7 @@ MINODE *iget(int dev, int ino)
 
 int iput(MINODE *mip) // dispose a used minode by mip
 {
-    INODE *ip;
+    INODE *tempIP;
 
     int blk, offset;
     char buf[BLKSIZE];
@@ -167,8 +167,8 @@ int iput(MINODE *mip) // dispose a used minode by mip
     
     offset = (mip->ino-1) % 8;
     get_block(mip->dev, blk, buf);
-    ip = (INODE *) buf + offset;
-    *ip= mip->INODE;
+    tempIP = (INODE *) buf + offset;
+    *tempIP= mip->INODE;
     put_block(mip->dev, blk, buf);
     mip->refCount = 0;
 }

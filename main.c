@@ -228,6 +228,7 @@ int rpwd(MINODE *wd) {
     }
 
     rpwd(pip);
+    printf("/%s", dirname);
 }
 
 int make_dir(char *pathname) {
@@ -270,6 +271,176 @@ int pwd(MINODE *wd) {
     }
 }
 
+int my_open(char *file, int flags) {
+    MINODE *mip;
+    int ino = getino(file);
+    if(ino == 0) {
+        creat(file, 0077);
+        ino = getino(file);
+    }
+    mip = iget(dev, ino);
+
+    OFT *otable = (OFT *)malloc(sizeof(OFT *));
+
+    otable->mode = flags;
+    otable->minodePtr = mip;
+    otable->refCount = 1;
+    if(flags < 3)
+        otable->offset = 0;
+    else {
+        struct stat st;
+        stat(file, &st);
+        otable->offset = mip->INODE.i_size;
+    }
+
+    for(int i = 0; i < NFD; i++) {
+        if(!running->fd[i]) {
+            running->fd[i] = otable;
+            printf("OFFSET: %d\n\n", otable->offset);
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+int my_lseek(int fd, int position) {
+    OFT *temp = running->fd[fd];
+    if(position <0 || position > temp->minodePtr->INODE.i_size){
+		printf("Invalid position entered \n");
+		return 0;
+	}
+
+    temp->offset = position;
+    return 0;
+} 
+
+int myclose(int fd) {
+    OFT *temp = running->fd[fd];
+    if(running->fd[fd]) {
+        temp->refCount--;
+        if(temp->refCount == 0) {
+            iput(temp->minodePtr);
+        }
+    }
+
+    running->fd[fd] = 0;
+}
+
+int myread(int fd, char *buf, int nbytes) {
+    int countBytes = 0;
+    MINODE *mip;
+    int lblk = 0, start = 0;
+    char kbuf[BLKSIZE];
+    int remain = 0;
+    char *cp;
+    int *indirect;
+
+    if(!running->fd[fd]) {
+        printf("File not opened\n");
+        return 0;
+    }
+    mip = running->fd[fd]->minodePtr;
+    int offset = running->fd[fd]->offset;
+    int avil = mip->INODE.i_size - offset;
+
+    while(nbytes && avil) {
+        lblk = offset / BLKSIZE;
+        start = offset % BLKSIZE;
+
+        if(lblk < 12) {
+            get_block(mip->dev, mip->INODE.i_block[lblk], kbuf);
+        }
+        else if(lblk < 12 + 256) {
+            get_block(mip->dev, mip->INODE.i_block[12], indirect);
+            get_block(mip->dev, indirect[lblk - 12], kbuf);
+        } 
+        
+        cp = kbuf + start;
+        remain = BLKSIZE - start;
+
+        int smaller = nbytes;
+        if(avil < nbytes )
+            smaller = avil;
+
+        countBytes += smaller;
+
+        offset += smaller;
+
+        if(smaller <= BLKSIZE)
+        {
+            strncpy(buf, cp, smaller);
+
+            break;
+        }
+        else {
+            strncpy(buf, cp, BLKSIZE);
+            avil-= 1024;
+            nbytes -= 1024;
+        }
+
+    }
+
+    running->fd[fd]->offset = offset;
+    return countBytes;
+}
+
+int my_write(int fd, char *buf, int nbytes) {
+    int countBytes = 0;
+    int lblk = 0, start = 0;
+    int *indirect;
+    char *cp;
+    int remain;
+    char *kbuf;
+    int fileSize = 0;
+
+    if(!running->fd[fd]) {
+        printf("File not opened\n");
+        return 0;
+    }
+    MINODE *mip = running->fd[fd]->minodePtr;
+    int offset = running->fd[fd]->offset;
+    fileSize = mip->INODE.i_size;
+    while (nbytes) {
+        lblk = offset / BLKSIZE;
+        start = offset % BLKSIZE;
+
+        if(lblk < 12) {
+            get_block(dev, mip->INODE.i_block[lblk], kbuf);
+        }
+        else if(lblk < 12 + 256) {
+            get_block(dev, mip->INODE.i_block[12], indirect);
+            get_block(dev, indirect[lblk - 12], kbuf);
+        } 
+
+        cp = kbuf + start;
+        remain = BLKSIZE - start;
+
+        while(remain) {
+            *cp++ = *buf++;
+            offset++; countBytes++;
+            remain--; nbytes--;
+            if (offset > fileSize) fileSize++; 
+            if (nbytes <= 0) break;
+        }
+    }
+
+    mip->dirty  = 1;
+    return countBytes;
+}
+
+int my_cat(char *pathname) {
+    int index = 0;
+    char buf[BLKSIZE];
+    index = my_open(pathname, 0);
+    if(index < 0){
+        printf("File not opened\n");
+    }
+    while(myread(index, buf, BLKSIZE))
+        printf("%s", buf);
+    return 0;
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
@@ -307,6 +478,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "pwd") == 0) {
             pwd(running->cwd);
+        }
+        else if(strcmp(cmd, "cat") == 0) {
+            my_cat(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
