@@ -24,30 +24,43 @@ int mount_root() {
     char buf[BLKSIZE];
     MOUNT *mp;
 
-    dev = open("disk", O_RDWR);
+    dev = open(disk, O_RDWR);
     if(dev < 0) {
         printf("Crash: Cannot open %s for read/write\n", disk);
         exit(1);
     }
 
+    // read SUPER block
     get_block(dev, 1, buf);
-    sp = (SUPER *) buf;
+    sp = (SUPER *)buf;
 
     if(sp->s_magic != EXT2_SUPER_MAGIC) {
         printf("Crash: %s is not an EXT2 Filesystem", disk);
         exit(1);
     }
-    mp = &mtable[0];
-    mp->dev = dev;
+
+    nblocks = sp->s_blocks_count;
+    ninodes = sp->s_inodes_count;
+    freeinodes = sp->s_free_inodes_count;
+    freeblocks = sp->s_free_blocks_count;
+
+    printf("nInodes=%d nBlocks=%d nfreeInodes=%d nfreeBlocks=%d\n",
+           ninodes, nblocks, freeinodes, freeblocks);
 
     get_block(dev, 2, buf);
     gp = (GD *) buf;
 
-    nblocks = sp->s_blocks_count;
-    ninodes = sp->s_inodes_count;
     bmap = gp->bg_block_bitmap;
     imap = gp->bg_inode_bitmap;
     inode_start = gp->bg_inode_table;
+
+    mp = &mtable;
+    mp->dev = dev;
+    mp->ninodes = ninodes;
+    mp->nblocks = nblocks;
+    mp->bmap = bmap;
+    mp->imap = imap;
+    mp->iblock = inode_start;
 
     root = iget(dev, 2);
     strcpy(cwd, "/");
@@ -61,30 +74,67 @@ int mount_root() {
 }
 
 int ch_dir(char *pathname) {
-    int ino = 0;
-    MINODE *mip;
-    if(strlen(pathname) < 1) {
-        ino = 2;
-    }
-    else {
-        ino = getino(pathname);
-        if(ino == 0) {
-            printf("File or directory not found.\n");
-            return;
-        } 
-    }
 
-    mip = iget(dev, ino);
-    
-    if(!S_ISDIR(mip->INODE.i_mode)) {
-        printf("Not a directory\n");
-        return;
-    }
-
-
-    iput(running->cwd);
-    running->cwd = mip;
+    int ino = getino(pathname);
+	MINODE * mip;
+	
+	if(ino)
+	{
+		mip = iget(running->cwd->dev, ino);
+		
+		if(mip->INODE.i_mode == 16877)
+		{
+			running->cwd = mip;
+			update_cwd(running->cwd);
+		}
+		else
+			printf("The supplied location was not a valid directory.\n");
+			
+		return;
+	}
+	
+	printf("The supplied path does not exist.\n");
 }
+
+void update_cwd(MINODE * dir)
+{
+	int ino;
+	char filename[255];
+	INODE ip;
+	MINODE * mip;
+	
+	if(dir->ino == 2)
+	{
+		strcpy(cwd, "/");
+		return;
+	}
+	
+	if((ino = search(dir, "..")) == 2) //If your parent directory is root
+	{
+		mip = iget(dir->dev, 2);
+		
+		//Load the name of the current directory
+		findmyname(mip, dir->ino, filename);
+		sprintf(cwd, "/%s", filename);
+
+        //cwd[strlen(cwd) - 1] = 0;
+		
+		return;
+	}
+	else
+	{
+		mip = iget(dir->dev, ino);
+		
+		rpwd(mip);
+		
+		//Load the name of the current directory
+		findmyname(mip, dir->ino, filename);
+		strcat(cwd, filename);
+		
+		return;
+	}
+}
+
 
 int ls(char *pathname) {
     MINODE *mip;
@@ -228,33 +278,219 @@ int rpwd(MINODE *wd) {
     }
 
     rpwd(pip);
-    printf("/%s", dirname);
+}
+
+int enter_name(MINODE *mip, int myino, char *myname)
+{
+
+    int i;
+    INODE *parent_ip = &mip->INODE;
+
+    char buf[1024];
+    char *cp;
+    DIR *dp;
+
+    int need_len = 0, ideal = 0, remain = 0;
+    int bno = 0, block_size = 1024;
+
+    //go through parent data blocks
+    for (i = 0; i < parent_ip->i_size / BLKSIZE; i++)
+    {
+        if (parent_ip->i_block[i] == 0)
+            break; //empty data block, break
+
+        //get bno to use in get_block
+        bno = parent_ip->i_block[i];
+
+        get_block(dev, bno, buf);
+
+        dp = (DIR *)buf;
+        cp = buf;
+
+        //need length
+        need_len = 4 * ((8 + strlen(myname) + 3) / 4);
+        printf("need len is %d\n", need_len);
+
+        //step into last dir entry
+        while (cp + dp->rec_len < buf + BLKSIZE)
+        {
+            cp += dp->rec_len;
+            dp = (DIR *)cp;
+        }
+
+        printf("last entry is %s\n", dp->name);
+        cp = (char *)dp;
+
+        //ideal length uses name len of last dir entry
+        ideal = 4 * ((8 + dp->name_len + 3) / 4);
+
+        //let remain = last entry's rec_len - its ideal length
+        remain = dp->rec_len - ideal;
+        printf("remain is %d\n", remain);
+
+        if (remain >= need_len)
+        {
+            //enter the new entry as the last entry and trim the previous entry to its ideal length
+            dp->rec_len = ideal;
+
+            cp += dp->rec_len;
+            dp = (DIR *)cp;
+
+            dp->inode = myino;
+            dp->rec_len = block_size - ((u32)cp - (u32)buf);
+            printf("rec len is %d\n", dp->rec_len);
+            dp->name_len = strlen(myname);
+            dp->file_type = EXT2_FT_DIR;
+            strcpy(dp->name, myname);
+
+            put_block(dev, bno, buf);
+
+            return 1;
+        }
+    }
+
+    printf("Number is %d...\n", i);
+
+    //no space in existing data blocks, time to allocate in next block
+    bno = balloc(dev);           //allocate blocks
+    parent_ip->i_block[i] = bno; //add to parent
+
+    parent_ip->i_size += BLKSIZE; //modify inode size
+    mip->dirty = 1;
+
+    get_block(dev, bno, buf);
+
+    dp = (DIR *)buf; //dir pointer modified
+    cp = buf;
+
+    printf("Dir name is %s\n", dp->name);
+
+    dp->inode = myino;             //set inode to myino
+    dp->rec_len = 1024;            //reset length to 1024
+    dp->name_len = strlen(myname); //set name to myname
+    dp->file_type = EXT2_FT_DIR;   //set dir type to EXT2 compatible
+    strcpy(dp->name, myname);      //set the dir pointer name to myname
+
+    put_block(dev, bno, buf); //add the block
+
+    return 1;
 }
 
 int make_dir(char *pathname) {
+    
     char temp[1024];
     char *parentname;
     char *base;
     int ino = 0;
 
-    MINODE *mip;
+    MINODE *mip, *pino, *pip;
+
+    //check for no pathname
+    if(strlen(pathname) == 0){
+        printf("No specified pathname!\n");
+        return 0;
+    }
 
     strcpy(temp, pathname);
 
     parentname = dirname(pathname);
     base = basename(temp);
 
-    if(!(ino = getino(pathname))) {
-        printf("Pathname is invalid.\n");
+    if(strcmp(&parentname[0], ".") ==0){
+
+        //parentname should be the cwd
+        parentname = cwd;
+    }
+
+    if(!(ino = getino(parentname))) {
+        printf("Pathname is invalid!\n");
         return 0;
     }
 
-    mip = iget(dev, ino);
+    pino = getino(parentname);
 
-    if(!S_ISDIR(mip->INODE.i_mode)) {
-        
+    pip = iget(dev, pino);
+
+    if(!S_ISDIR(pip->INODE.i_mode)) {
+
+        printf("%s is not a directory!\n", parentname);
+        return 0;
     }
 
+    //check that the basename does not already exist in the directory
+    if(getino(pathname) != 0){
+        printf("%s already exists!\n");
+    }
+
+    mymkdir(pip, base);
+
+}
+
+int mymkdir(MINODE *pmip, char *name)
+{
+
+    int ino, block;
+    MINODE *mip;
+    char *cp, buf[BLKSIZE];
+
+    ino = ialloc(running->cwd->dev);
+    block = balloc(running->cwd->dev);
+
+    mip = iget(running->cwd->dev, ino);
+
+    //write to inode
+    ip = &(mip->INODE);
+    //INODE *ip = &mip->INODE;
+    //Use ip->to acess the INODE fields :
+
+    ip->i_mode = 0x41ED;                 // OR 040755: DIR type and permissions
+    ip->i_uid = running->uid;                   // Owner uid
+    ip->i_gid = running->gid;                   // Group Id
+    ip->i_size = BLKSIZE;                       // Size in bytes
+    ip->i_links_count = 2;                      // Links count=2 because of . and ..
+    ip->i_atime = time(0L);                     // set to current time
+    ip->i_ctime = time(0L);
+    ip->i_mtime = time(0L); 
+    ip->i_blocks = 2;                           // LINUX: Blocks count in 512-byte chunks
+    ip->i_block[0] = block;                     // new DIR has one data block
+
+    //setting blocks [1-14]
+    for (int i = 1; i < 15; i++)
+    {
+
+        ip->i_block[i] = 0;
+    }
+
+    mip->dirty = 1;//set dirty to true
+	iput(mip);
+
+	//create data block for new DIR containing . and ..
+	get_block(running->cwd->dev, block, buf);
+
+	dp = (DIR*)buf;
+	cp = buf;
+
+	
+    dp->inode = ino;
+    dp->rec_len = 4*((8 + 1 + 3)/4); //ideal length
+    dp->name_len = 1;
+    strcpy(dp->name, ".");
+
+    cp += dp->rec_len;
+    dp = (DIR*)cp;
+
+    dp->inode = pmip->ino;
+    dp->rec_len = BLKSIZE - 12;
+    dp->name_len = 2;
+    strcpy(dp->name, "..");
+
+	//write buf to disk block bno
+	put_block(running->cwd->dev, block, buf);
+
+	//enter name entry into parent's directory
+	enter_name(pmip, ino, name);
+	
+    return 1;
 }
 
 int dir_alloc() {
@@ -269,176 +505,6 @@ int pwd(MINODE *wd) {
         rpwd(wd);
         printf("\n");
     }
-}
-
-int my_open(char *file, int flags) {
-    MINODE *mip;
-    int ino = getino(file);
-    if(ino == 0) {
-        creat(file, 0077);
-        ino = getino(file);
-    }
-    mip = iget(dev, ino);
-
-    OFT *otable = (OFT *)malloc(sizeof(OFT *));
-
-    otable->mode = flags;
-    otable->minodePtr = mip;
-    otable->refCount = 1;
-    if(flags < 3)
-        otable->offset = 0;
-    else {
-        struct stat st;
-        stat(file, &st);
-        otable->offset = mip->INODE.i_size;
-    }
-
-    for(int i = 0; i < NFD; i++) {
-        if(!running->fd[i]) {
-            running->fd[i] = otable;
-            printf("OFFSET: %d\n\n", otable->offset);
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-int my_lseek(int fd, int position) {
-    OFT *temp = running->fd[fd];
-    if(position <0 || position > temp->minodePtr->INODE.i_size){
-		printf("Invalid position entered \n");
-		return 0;
-	}
-
-    temp->offset = position;
-    return 0;
-} 
-
-int myclose(int fd) {
-    OFT *temp = running->fd[fd];
-    if(running->fd[fd]) {
-        temp->refCount--;
-        if(temp->refCount == 0) {
-            iput(temp->minodePtr);
-        }
-    }
-
-    running->fd[fd] = 0;
-}
-
-int myread(int fd, char *buf, int nbytes) {
-    int countBytes = 0;
-    MINODE *mip;
-    int lblk = 0, start = 0;
-    char kbuf[BLKSIZE];
-    int remain = 0;
-    char *cp;
-    int *indirect;
-
-    if(!running->fd[fd]) {
-        printf("File not opened\n");
-        return 0;
-    }
-    mip = running->fd[fd]->minodePtr;
-    int offset = running->fd[fd]->offset;
-    int avil = mip->INODE.i_size - offset;
-
-    while(nbytes && avil) {
-        lblk = offset / BLKSIZE;
-        start = offset % BLKSIZE;
-
-        if(lblk < 12) {
-            get_block(mip->dev, mip->INODE.i_block[lblk], kbuf);
-        }
-        else if(lblk < 12 + 256) {
-            get_block(mip->dev, mip->INODE.i_block[12], indirect);
-            get_block(mip->dev, indirect[lblk - 12], kbuf);
-        } 
-        
-        cp = kbuf + start;
-        remain = BLKSIZE - start;
-
-        int smaller = nbytes;
-        if(avil < nbytes )
-            smaller = avil;
-
-        countBytes += smaller;
-
-        offset += smaller;
-
-        if(smaller <= BLKSIZE)
-        {
-            strncpy(buf, cp, smaller);
-
-            break;
-        }
-        else {
-            strncpy(buf, cp, BLKSIZE);
-            avil-= 1024;
-            nbytes -= 1024;
-        }
-
-    }
-
-    running->fd[fd]->offset = offset;
-    return countBytes;
-}
-
-int my_write(int fd, char *buf, int nbytes) {
-    int countBytes = 0;
-    int lblk = 0, start = 0;
-    int *indirect;
-    char *cp;
-    int remain;
-    char *kbuf;
-    int fileSize = 0;
-
-    if(!running->fd[fd]) {
-        printf("File not opened\n");
-        return 0;
-    }
-    MINODE *mip = running->fd[fd]->minodePtr;
-    int offset = running->fd[fd]->offset;
-    fileSize = mip->INODE.i_size;
-    while (nbytes) {
-        lblk = offset / BLKSIZE;
-        start = offset % BLKSIZE;
-
-        if(lblk < 12) {
-            get_block(dev, mip->INODE.i_block[lblk], kbuf);
-        }
-        else if(lblk < 12 + 256) {
-            get_block(dev, mip->INODE.i_block[12], indirect);
-            get_block(dev, indirect[lblk - 12], kbuf);
-        } 
-
-        cp = kbuf + start;
-        remain = BLKSIZE - start;
-
-        while(remain) {
-            *cp++ = *buf++;
-            offset++; countBytes++;
-            remain--; nbytes--;
-            if (offset > fileSize) fileSize++; 
-            if (nbytes <= 0) break;
-        }
-    }
-
-    mip->dirty  = 1;
-    return countBytes;
-}
-
-int my_cat(char *pathname) {
-    int index = 0;
-    char buf[BLKSIZE];
-    index = my_open(pathname, 0);
-    if(index < 0){
-        printf("File not opened\n");
-    }
-    while(myread(index, buf, BLKSIZE))
-        printf("%s", buf);
-    return 0;
 }
 
 int quit() {
@@ -479,8 +545,11 @@ int main(int argc, char *argv[]) {
         else if(strcmp(cmd, "pwd") == 0) {
             pwd(running->cwd);
         }
-        else if(strcmp(cmd, "cat") == 0) {
-            my_cat(pathname);
+        else if(strcmp(cmd, "mkdir") == 0){
+
+            make_dir(pathname);
+
+
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
