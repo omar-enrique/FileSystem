@@ -21,7 +21,7 @@ int init() {
 }
 
 int mount_root() {
-    char buf[BLKSIZE];
+    char sbuf[BLKSIZE], gbuf[BLKSIZE];
     MOUNT *mp;
 
     dev = open(disk, O_RDWR);
@@ -30,9 +30,14 @@ int mount_root() {
         exit(1);
     }
 
+<<<<<<< HEAD
     // read SUPER block
     get_block(dev, 1, buf);
     sp = (SUPER *)buf;
+=======
+    get_block(dev, 1, sbuf);
+    sp = (SUPER *) sbuf;
+>>>>>>> origin/omar
 
     if(sp->s_magic != EXT2_SUPER_MAGIC) {
         printf("Crash: %s is not an EXT2 Filesystem", disk);
@@ -47,9 +52,16 @@ int mount_root() {
     printf("nInodes=%d nBlocks=%d nfreeInodes=%d nfreeBlocks=%d\n",
            ninodes, nblocks, freeinodes, freeblocks);
 
-    get_block(dev, 2, buf);
-    gp = (GD *) buf;
+    get_block(dev, 2, gbuf);
+    gp = (GD *) gbuf;
 
+<<<<<<< HEAD
+=======
+    nblocks = sp->s_blocks_count;
+    ninodes = sp->s_inodes_count;
+    freeinodes = sp->s_free_inodes_count;
+    freeblocks = sp->s_free_blocks_count;
+>>>>>>> origin/omar
     bmap = gp->bg_block_bitmap;
     imap = gp->bg_inode_bitmap;
     inode_start = gp->bg_inode_table;
@@ -376,13 +388,21 @@ int enter_name(MINODE *mip, int myino, char *myname)
     return 1;
 }
 
+<<<<<<< HEAD
 int make_dir(char *pathname) {
     
+=======
+int my_mkdir(char *pathname) {
+>>>>>>> origin/omar
     char temp[1024];
+    char buf[BLKSIZE];
+    DIR *newDP = (DIR *) buf;
     char *parentname;
     char *base;
-    int ino = 0;
+    int parentino = 0, ino = 0, blk = 0;
+    char *cp = buf;
 
+<<<<<<< HEAD
     MINODE *mip, *pino, *pip;
 
     //check for no pathname
@@ -390,12 +410,16 @@ int make_dir(char *pathname) {
         printf("No specified pathname!\n");
         return 0;
     }
+=======
+    MINODE *mip, *parentmip;
+    INODE *newIP;
+>>>>>>> origin/omar
 
     strcpy(temp, pathname);
 
-    parentname = dirname(pathname);
-    base = basename(temp);
+    parentname = dirname(pathname);   
 
+<<<<<<< HEAD
     if(strcmp(&parentname[0], ".") ==0){
 
         //parentname should be the cwd
@@ -412,6 +436,163 @@ int make_dir(char *pathname) {
     pip = iget(dev, pino);
 
     if(!S_ISDIR(pip->INODE.i_mode)) {
+=======
+    base = basename(temp);
+    
+    if((parentino = getino(parentname)) < 0) {
+        printf("Pathname is invalid.\n");
+        return 0;
+    }
+    parentmip = iget(dev, parentino);
+
+    if(!S_ISDIR(parentmip->INODE.i_mode)) {
+        printf("Pathname does not lead to a directory\n");
+        return 0;
+    }
+    if(search(parentmip, base)) {
+        printf("Directory already exists\n");
+        return 0;
+    }
+    ino = ialloc(dev);
+    blk = balloc(dev);
+    printf("INO: %d, BLK: %d\n", ino, blk);
+    mip = iget(dev, ino);
+    get_block(dev, blk, buf);
+
+    newIP = &mip->INODE;
+    newIP->i_mode = 0x41ED;
+    // 040755: DIR type and permissions
+    newIP->i_uid = running->uid; // owner uid
+    newIP->i_gid = running->gid; // group Id
+    newIP->i_size = BLKSIZE;
+    newIP->i_links_count = 2;
+    // links count=2 because of . and ..
+    newIP->i_atime = newIP->i_ctime = newIP->i_mtime = time(0L);
+    newIP->i_blocks = 2;
+    // LINUX: Blocks count in 512-byte chunks
+    newIP->i_block[0] = blk;
+    for(int i = 1; i < 15; i++) {
+        newIP->i_block[i] = 0;
+    }
+    mip->dirty = 1;
+    iput(mip);
+    
+    newDP->inode = ino;
+    newDP->rec_len = 12;
+    newDP->name_len  = 1;
+    newDP->name[0] = '.';
+    newDP->file_type = (u8)EXT2_FT_DIR;
+
+    cp += newDP->rec_len;
+    newDP = (DIR*)cp;
+
+    newDP->inode = parentino;
+    newDP->rec_len = BLKSIZE - 12;
+    newDP->name_len = 2;
+    newDP->file_type = (u8)EXT2_FT_DIR; //EXT2 dir type
+    newDP->name[0] = newDP->name[1] = '.';
+    put_block(dev, blk, buf);
+
+    enter_name(parentmip, ino, base);
+
+    return 0;
+}
+
+int enter_name(MINODE *mip, int myino, char *myname)
+{
+    int i;
+    INODE *parent_ip = &mip->INODE;
+
+    char buf[1024];
+    char *cp;
+    DIR *newDP;
+
+    int need_len = 0, ideal = 0, remain = 0;
+    int bno = 0, block_size = 1024;
+
+    //go through parent data blocks
+    for (i = 0; i < parent_ip->i_size / BLKSIZE; i++)
+    {
+        if (parent_ip->i_block[i] == 0)
+            break; //empty data block, break
+
+        //get bno to use in get_block
+        bno = parent_ip->i_block[i];
+
+        get_block(dev, bno, buf);
+
+        newDP = (DIR *)buf;
+        cp = buf;
+
+        //need length
+        need_len = 4 * ((8 + strlen(myname) + 3) / 4);
+        printf("need len is %d\n", need_len);
+
+        //step into last dir entry
+        while (cp + newDP->rec_len < buf + BLKSIZE)
+        {
+            cp += newDP->rec_len;
+            newDP = (DIR *)cp;
+        }
+
+        printf("last entry is %s\n", newDP->name);
+        cp = (char *)newDP;
+
+        //ideal length uses name len of last dir entry
+        ideal = 4 * ((8 + newDP->name_len + 3) / 4);
+
+        //let remain = last entry's rec_len - its ideal length
+        remain = newDP->rec_len - ideal;
+        printf("remain is %d\n", remain);
+
+        if (remain >= need_len)
+        {
+            //enter the new entry as the last entry and trim the previous entry to its ideal length
+            newDP->rec_len = ideal;
+
+            cp += newDP->rec_len;
+            newDP = (DIR *)cp;
+
+            newDP->inode = myino;
+            newDP->rec_len = block_size - ((u32)cp - (u32)buf);
+            printf("rec len is %d\n", newDP->rec_len);
+            newDP->name_len = strlen(myname);
+            newDP->file_type = EXT2_FT_DIR;
+            strcpy(newDP->name, myname);
+
+            put_block(dev, bno, buf);
+
+            return 1;
+        }
+    }
+
+    printf("Number is %d...\n", i);
+
+    //no space in existing data blocks, time to allocate in next block
+    bno = balloc(dev);           //allocate blocks
+    parent_ip->i_block[i] = bno; //add to parent
+
+    parent_ip->i_size += BLKSIZE; //modify inode size
+    mip->dirty = 1;
+
+    get_block(dev, bno, buf);
+
+    newDP = (DIR *)buf; //dir pointer modified
+    cp = buf;
+
+    printf("Dir name is %s\n", newDP->name);
+
+    newDP->inode = myino;             //set inode to myino
+    newDP->rec_len = 1024;            //reset length to 1024
+    newDP->name_len = strlen(myname); //set name to myname
+    newDP->file_type = EXT2_FT_DIR;   //set dir type to EXT2 compatible
+    strcpy(newDP->name, myname);      //set the dir pointer name to myname
+
+    put_block(dev, bno, buf); //add the block
+
+    return 1;
+}
+>>>>>>> origin/omar
 
         printf("%s is not a directory!\n", parentname);
         return 0;
@@ -550,6 +731,9 @@ int main(int argc, char *argv[]) {
             make_dir(pathname);
 
 
+        }
+        else if(strcmp(cmd, "mkdir") == 0) {
+            my_mkdir(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
