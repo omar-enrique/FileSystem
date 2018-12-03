@@ -86,6 +86,43 @@ int ch_dir(char *pathname) {
 
     iput(running->cwd);
     running->cwd = mip;
+
+    update_cwd(running->cwd);
+}
+
+void update_cwd(MINODE *dir)
+{
+    int ino;
+    char filename[255];
+    INODE ip;
+    MINODE *mip;
+    if (dir->ino == 2)
+    {
+        strcpy(cwd, "/");
+        return;
+    }
+
+    if ((ino = search(dir, "..")) == 2) //If your parent directory is root
+    {
+        mip = iget(dir->dev, 2);
+        //Load the name of the current directory
+        findmyname(mip, dir->ino, filename);
+        sprintf(cwd, "/%s", filename);
+
+        int length = strlen(cwd);
+        cwd[length] = 0;
+        //cwd[strlen(cwd) - 1] = 0;
+        return;
+    }
+    else
+    {
+        mip = iget(dir->dev, ino);
+        rpwd(mip);
+        //Load the name of the current directory
+        findmyname(mip, dir->ino, filename);
+        strcat(cwd, filename);
+        return;
+    }
 }
 
 int ls(char *pathname) {

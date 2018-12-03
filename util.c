@@ -357,11 +357,50 @@ int getino(char *pathname)
 // THESE two functions are for pwd(running->cwd), which prints the absolute
 // pathname of CWD. 
 
-int findmyname(MINODE *parent, u32 myino, char *myname) 
+int findmyname(MINODE *mip, int ino, char *filename) 
 {
-   // parent -> at a DIR minode, find myname by myino
-   // get name string of myino: SAME as search except by myino;
-   // copy entry name (string) into myname[ ];
+   int i = 0;
+	char ibuf[1024];
+	INODE inode = mip->INODE;
+	
+	//Check for if the supplied inode is a directory
+	if(inode.i_mode == 16877)
+	{
+		//Access every data block that this directory contains
+		for(i; i<12; i++)
+		{
+			//Use this INODE to find the data block number
+			u32 iblock = inode.i_block[i];
+			
+			if(iblock) //If the block number is 0, that block does not exist
+			{
+				//Read in the block and print the directory listing
+				get_block(mip->dev, iblock, ibuf);
+				
+				char * cp = ibuf; //Character pointer to hold the current position within the block
+				DIR * dp = (DIR *)ibuf;
+				
+				while(cp < &ibuf[BLKSIZE])
+				{
+					//If this is the inode we're looking for
+					if(dp->inode == ino)
+					{
+						strcpy(filename, dp->name); //Copy the name
+						return 1;
+					}
+					
+					//Increment cp and set dp to the next file in the directory
+					cp += dp->rec_len;
+					dp = (DIR *)cp;
+				}
+			}
+		}
+		
+		return 0;
+	}
+	
+	printf("The file supplied was not a directory\n");
+	return 0;
 }
 
 
