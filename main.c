@@ -290,12 +290,13 @@ int my_open(char *file, int flags) {
     else {
         struct stat st;
         stat(file, &st);
-        otable->offset = st.st_size;
+        otable->offset = mip->INODE.i_size;
     }
 
     for(int i = 0; i < NFD; i++) {
         if(!running->fd[i]) {
-            running->fd[i] = &otable;
+            running->fd[i] = otable;
+            printf("OFFSET: %d\n\n", otable->offset);
             return i;
         }
     }
@@ -330,7 +331,7 @@ int myread(int fd, char *buf, int nbytes) {
     int countBytes = 0;
     MINODE *mip;
     int lblk = 0, start = 0;
-    char *kbuf;
+    char kbuf[BLKSIZE];
     int remain = 0;
     char *cp;
     int *indirect;
@@ -348,25 +349,39 @@ int myread(int fd, char *buf, int nbytes) {
         start = offset % BLKSIZE;
 
         if(lblk < 12) {
-            get_block(dev, mip->INODE.i_block[lblk], kbuf);
+            get_block(mip->dev, mip->INODE.i_block[lblk], kbuf);
         }
         else if(lblk < 12 + 256) {
-            get_block(dev, mip->INODE.i_block[12], indirect);
-            get_block(dev, indirect[lblk - 12], kbuf);
+            get_block(mip->dev, mip->INODE.i_block[12], indirect);
+            get_block(mip->dev, indirect[lblk - 12], kbuf);
         } 
         
         cp = kbuf + start;
         remain = BLKSIZE - start;
 
-        while(remain) {
-            *buf++ = *cp++;
-            offset++; countBytes++;
-            remain--; avil--; nbytes--;
-            if(nbytes <= 0 || avil <= 0) 
-                break;
+        int smaller = nbytes;
+        if(avil < nbytes )
+            smaller = avil;
+
+        countBytes += smaller;
+
+        offset += smaller;
+
+        if(smaller <= BLKSIZE)
+        {
+            strncpy(buf, cp, smaller);
+
+            break;
         }
+        else {
+            strncpy(buf, cp, BLKSIZE);
+            avil-= 1024;
+            nbytes -= 1024;
+        }
+
     }
 
+    running->fd[fd]->offset = offset;
     return countBytes;
 }
 
@@ -414,6 +429,18 @@ int my_write(int fd, char *buf, int nbytes) {
     return countBytes;
 }
 
+int my_cat(char *pathname) {
+    int index = 0;
+    char buf[BLKSIZE];
+    index = my_open(pathname, 0);
+    if(index < 0){
+        printf("File not opened\n");
+    }
+    while(myread(index, buf, BLKSIZE))
+        printf("%s", buf);
+    return 0;
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
@@ -451,6 +478,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "pwd") == 0) {
             pwd(running->cwd);
+        }
+        else if(strcmp(cmd, "cat") == 0) {
+            my_cat(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
