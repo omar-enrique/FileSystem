@@ -937,6 +937,90 @@ int removeDirEntry(MINODE *parent, const char* name)
 	return -1;
 }
 
+int symlink(char *pathname)
+{
+	char *src = pathname;
+	char *destination = three;
+
+	char tmpa[strlen(src) + 1];
+	strcpy(tmpa, src);
+
+	//int dev;
+	int ino = getino(src);
+	if(ino == -1)
+	{
+		printf("Invalid source path.\n");
+		return -1;
+	}
+    MINODE *mipsrc = iget(dev, ino);
+
+	if(!S_ISDIR(mipsrc->INODE.i_mode) && (!S_ISREG(mipsrc->INODE.i_mode)))
+	{
+		iput(mipsrc);
+		printf("Source is not a regular file or a directory.\n");
+		return -1;
+	}
+	
+	char path[strlen(destination) + 1];
+	strcpy(path, destination);
+	char *base = basename(destination);
+	char *dir = NULL;
+	if(strcmp(base, path) == 0)
+	{
+		dir = dirname(path);
+	}
+
+	ino = getino(dir);
+	if(ino == -1)
+	{
+		iput(mipsrc);
+		printf("Invalid target path\n");
+		return -1;
+	}
+    MINODE *mipparent = iget(dev, ino);
+	if(!S_ISDIR(mipparent->INODE.i_mode))
+	{
+		iput(mipsrc);
+		iput(mipparent);
+		printf("Target path is not a directory.\n");
+		return -1;
+	}
+
+    //get a new inode and send it to the naming function as a symlink
+	ino = ialloc(dev);
+	enter_name(mipparent, ino, base, EXT2_FT_SYMLINK);
+
+    MINODE *mip = iget(dev, ino);
+
+    //set those good ol properties
+	mip->INODE.i_mode = 0120000;
+	mip->INODE.i_uid = running->uid;
+	mip->INODE.i_gid = running->gid;
+	mip->INODE.i_size = 0;
+	mip->INODE.i_links_count = 0;
+	mip->INODE.i_atime = mip->INODE.i_ctime = mip->INODE.i_mtime = time(0);
+	mip->INODE.i_blocks = 0;
+	mip->dirty = 1;
+
+    //zero the blocks
+	for(int i = 0; i < 15; ++i)
+	{
+		mip->INODE.i_block[i] = 0;
+    }
+
+    //Increment the link ocunt
+	mip->INODE.i_links_count++;
+	strcpy((char *)mip->INODE.i_block, tmpa);
+
+    //stash em!
+    //side note.. this project is wearing thin on my patience
+	iput(mip);
+	iput(mipsrc);
+	iput(mipparent);
+	
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if(argc > 1) 
         disk = argv[1];
@@ -978,6 +1062,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "unlink") == 0){
             unlink(pathname);
+        }
+        else if(strcmp(cmd, "symlink") == 0){
+            symlink(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
