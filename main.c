@@ -110,7 +110,7 @@ void update_cwd(MINODE *dir)
         sprintf(cwd, "/%s", filename);
 
         int length = strlen(cwd);
-        cwd[length] = 0;
+        cwd[length -1] = 0;
         //cwd[strlen(cwd) - 1] = 0;
         return;
     }
@@ -120,7 +120,11 @@ void update_cwd(MINODE *dir)
         rpwd(mip);
         //Load the name of the current directory
         findmyname(mip, dir->ino, filename);
+        strcat(cwd, "/");
         strcat(cwd, filename);
+
+        int length = strlen(cwd);
+        cwd[length] = 0;
         return;
     }
 }
@@ -344,14 +348,76 @@ int my_mkdir(char *pathname) {
 
     enter_name(parentmip, ino, base);
 
-    return 0;
+    return 1;
+}
+
+int my_creat(char *pathname){
+
+    char temp[1024];
+    char buf[BLKSIZE];
+    DIR *newDP = (DIR *) buf;
+    char *parentname;
+    char *base;
+    int parentino = 0, ino = 0, blk = 0;
+    char *cp = buf;
+
+    MINODE *mip, *parentmip;
+    INODE *newIP;
+
+    strcpy(temp, pathname);
+
+    parentname = dirname(pathname);   
+
+    base = basename(temp);
+    
+    if((parentino = getino(parentname)) < 0) {
+        printf("Pathname is invalid.\n");
+        return 0;
+    }
+    parentmip = iget(dev, parentino);
+
+    if(!S_ISDIR(parentmip->INODE.i_mode)) {
+        printf("Pathname does not lead to a directory\n");
+        return 0;
+    }
+
+    if(search(parentmip, base)) {
+        printf("File already exists\n");
+        return 0;
+    }
+    ino = ialloc(dev);
+    blk = balloc(dev);
+    printf("INO: %d, BLK: %d\n", ino, blk);
+    mip = iget(dev, ino);
+    get_block(dev, blk, buf);
+
+    newIP = &mip->INODE;
+    newIP->i_mode = 0x81A4;
+    newIP->i_uid = running->uid; // owner uid
+    newIP->i_gid = running->gid; // group Id
+    newIP->i_size = 0;
+    newIP->i_links_count = 1;
+    newIP->i_atime = newIP->i_ctime = newIP->i_mtime = time(0L);
+    newIP->i_blocks = 0;
+    
+
+    for(int i = 0; i < 15; i++) {
+        newIP->i_block[i] = 0;
+    }
+
+    mip->dirty = 1;
+    iput(mip);
+    
+    enter_name(parentmip, ino, base);
+
+    return 1;
 }
 
 int enter_name(MINODE *mip, int myino, char *myname)
 {
     int i;
     INODE *parent_ip = &mip->INODE;
-
+    
     char buf[1024];
     char *cp;
     DIR *newDP;
@@ -665,6 +731,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "mkdir") == 0) {
             my_mkdir(pathname);
+        }
+        else if(strcmp(cmd, "creat") == 0){
+            my_creat(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
