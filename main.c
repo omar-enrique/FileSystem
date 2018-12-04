@@ -521,8 +521,8 @@ int pwd(MINODE *wd) {
 int my_open(char *file, int flags) {
     MINODE *mip;
     int ino = getino(file);
-    if(ino == 0) {
-        creat(file, 0077);
+    if(ino <= 0) {
+        my_creat(file);
         ino = getino(file);
     }
     mip = iget(dev, ino);
@@ -648,6 +648,8 @@ int my_write(int fd, char *buf, int nbytes) {
     MINODE *mip = running->fd[fd]->minodePtr;
     int offset = running->fd[fd]->offset;
     fileSize = mip->INODE.i_size;
+
+    printf("BUF: %s\nFILESIZE: %d", buf, fileSize);
     while (nbytes) {
         lblk = offset / BLKSIZE;
         start = offset % BLKSIZE;
@@ -670,6 +672,8 @@ int my_write(int fd, char *buf, int nbytes) {
             if (offset > fileSize) fileSize++; 
             if (nbytes <= 0) break;
         }
+
+        put_block(mip->dev, lblk, kbuf);
     }
 
     mip->dirty  = 1;
@@ -685,6 +689,7 @@ int my_cat(char *pathname) {
     }
     while(myread(index, buf, BLKSIZE))
         printf("%s", buf);
+    myclose(index);
     return 0;
 }
 
@@ -793,6 +798,46 @@ void link(char *path)
     return;
 }
 
+int my_cp(char *src, char *dest) {
+    int index_src = 0, index_dest = 0;
+    char buf[BLKSIZE]= { 0 };
+    char finalBuf[BLKSIZE] = { 0 };
+    index_src = my_open(src, 0);
+    if(index_src < 0){
+        printf("Source not opened\n");
+    }
+    index_dest = my_open(dest, 1);
+    if(index_dest < 0){
+        printf("Destination file not opened\n");
+    }
+    while(myread(index_src, buf, BLKSIZE)) {
+        strcat(finalBuf, buf);
+        my_write(index_dest, finalBuf, BLKSIZE);
+    }
+    myclose(index_src);
+    myclose(index_dest);
+}
+
+int my_mv(char *src, char *dest) {
+    int index_src = 0, index_dest = 0;
+    char buf[BLKSIZE];
+    char *finalBuf;
+    // index_src = my_open(src, 0);
+    // if(index_src < 0){
+    //     printf("Source not opened\n");
+    // }
+    // index_dest = my_open(dest, 1);
+    // if(index_dest < 0){
+    //     printf("Destination file not opened\n");
+    // }
+    // while(myread(index_src, buf, BLKSIZE))
+    //     strcat(finalBuf, buf);
+    
+    // printf("%s",finalBuf);
+    // myrm(src);
+    // myclose(index_dest);
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
@@ -820,6 +865,7 @@ int main(int argc, char *argv[]) {
         line[strlen(line) - 1] = 0;
         if(line[0] == 0)
             continue;
+    
         sscanf(line, "%s %s %s", cmd, pathname, three);
 
         if(strcmp(cmd, "cd") == 0) {
@@ -843,6 +889,13 @@ int main(int argc, char *argv[]) {
         else if(strcmp(cmd, "ln") == 0){
             link(pathname);
         }
+        else if(strcmp(cmd, "cp") == 0) {
+            printf("CMD: %s, PATH: %s, DEST: %s", cmd, pathname, three);
+            my_cp(pathname, three); 
+        }
+        else if(strcmp(cmd, "mv")) {
+            printf("CMD: %s, PATH: %s, DEST: %s", cmd, pathname, three);
+        }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
         }
@@ -852,5 +905,6 @@ int main(int argc, char *argv[]) {
         printf("\n");
 
         memset(pathname, 0, 256);
+        memset(three, 0 , 256);
     }
 }

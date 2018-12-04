@@ -21,7 +21,7 @@ int  n;
 
 int  fd, dev;
 int  nblocks, ninodes, bmap, imap, inode_start;
-char line[256], cmd[32], pathname[256], three[32];
+char line[256], cmd[32], pathname[256], three[256];
 char cwd[256];
 
 int freeinodes, freeblocks;
