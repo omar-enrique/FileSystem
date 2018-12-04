@@ -688,7 +688,7 @@ int my_cat(char *pathname) {
     return 0;
 }
 
-void link(char *path)
+void link(char *pathname)
 {
     char source[64], destination[64], temp[64];
     char link_parent[64], link_child[64];
@@ -700,7 +700,7 @@ void link(char *path)
     INODE *p_ip;   //another inode pointer
 
     //Checks
-    if (!strcmp(path, ""))
+    if (!strcmp(pathname, ""))
     {
         printf("No source file!\n");
         return;
@@ -712,7 +712,7 @@ void link(char *path)
         return;
     }
 
-    strcpy(source, path); //make some copies
+    strcpy(source, pathname); //make some copies
     strcpy(destination, three);
 
     //get sourcefilename's inode
@@ -722,13 +722,14 @@ void link(char *path)
     //verify source file exists
     if (!mip)
     {
-        printf("ERROR: %s does not exist!\n", source);
+        printf("%s does not exist!\n", source);
         return;
     }
+
     //Verify it is a file
     if (S_ISDIR(mip->INODE.i_mode))
     {
-        printf("ERROR: Can't link a directory!\n");
+        printf("Can't link a directory!\n");
         return;
     }
 
@@ -793,6 +794,45 @@ void link(char *path)
     return;
 }
 
+int unlink(char *pathname)
+{
+	char path[strlen(pathname) + 1];
+	strcpy(path, pathname);
+	char *base = basename(pathname);
+	char *dir = NULL;
+
+	if(strcmp(base, path) == 0)
+	{
+		dir = dirname(path);
+	}
+
+	int dev;
+	int parentino = getino(dir);
+	if(parentino == -1)
+	{
+		printf("Could not find parent.\n");
+		return -1;
+	}
+
+	MINODE *pip = iget(running->cwd->dev, parentino);
+	if((pip->INODE.i_mode & 0x4000) != 0x4000)
+	{
+		iput(pip);
+		printf("Parent is not a directory.\n");
+		return -1;
+	}
+
+	// remove direntry
+	int rem = removeDirEntry(pip, base);
+	iput(pip);
+    if (rem == -1)
+    {
+        printf("Unabe to remove link.\n");
+        return -1;
+    }
+    return 0;
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
@@ -802,6 +842,99 @@ int quit() {
         }
     }
     exit(1);
+}
+
+int removeDirEntry(MINODE *parent, const char* name)
+{
+    char buf[BLKSIZE];
+    for(int i = 0; i < 12; ++i)
+    {
+        if(parent->INODE.i_block[i] != 0)
+        {
+            get_block(parent->dev, parent->INODE.i_block[i], buf);
+            DIR *dir = (DIR *)&buf;
+            DIR *prevdir;
+            int pos = 0;
+            char *loc = (char *)dir;
+            
+            while(pos < BLKSIZE)
+            {
+                char dirname[dir->name_len + 1];
+                strncpy(dirname, dir->name, dir->name_len);
+                dirname[dir->name_len] = '\0';
+
+				if(!strcmp(dirname, name))  // found dir
+                {
+                    if (pos + dir->rec_len == BLKSIZE)   //last entry
+                    {
+						if (pos == 0)   // only entry in block
+                        {
+                            int tmp = parent->INODE.i_block[i];
+                            parent->INODE.i_block[i] = 0;
+                            bdealloc(parent->dev, tmp);
+							parent->dirty = 1;
+                            return 0;
+                        }
+
+						prevdir->rec_len += dir->rec_len;
+						put_block(parent->dev, parent->INODE.i_block[i], buf);
+                        return 0;
+                    }
+                    
+                    prevdir = dir;  // set tail
+                    int posb = pos;
+                    
+                    // move head rec_len bytes
+                    loc = (char *)dir;
+                    loc += dir->rec_len;
+                    posb += dir->rec_len;
+                    dir = (DIR *)loc;
+                   
+                    int remlen = prevdir->rec_len; // leftover space
+                    
+                    while(posb < BLKSIZE)
+                    {
+                        prevdir->rec_len = dir->rec_len;    // assign
+                        
+                        // copy head to tail
+                        prevdir->inode = dir->inode;
+                        prevdir->file_type = dir->file_type;
+                        prevdir->name_len = dir->name_len;
+                        memcpy(prevdir->name, dir->name, dir->name_len);
+                        
+                        // give rest of space to prevdir
+                        if (posb + dir->rec_len == BLKSIZE)
+                        {
+                            prevdir->rec_len += remlen;
+							put_block(parent->dev, parent->INODE.i_block[i], buf);
+                            return 0;
+                        }
+                        
+                        // move head rec_len bytes
+                        loc = (char *)dir;
+                        loc += dir->rec_len;
+                        posb += dir->rec_len;
+                        dir = (DIR *)loc;
+                        
+                        // move tail rec_len bytes
+                        loc = (char *)prevdir;
+                        loc += prevdir->rec_len;
+                        posb += prevdir->rec_len;
+                        prevdir = (DIR *)loc;
+                    }
+                }
+                prevdir = dir;
+                
+                // move rec_len bytes
+                loc = (char *)dir;
+                loc += dir->rec_len;
+				pos += dir->rec_len;
+                dir = (DIR *)loc;
+                
+            }
+        }
+    }
+	return -1;
 }
 
 int main(int argc, char *argv[]) {
@@ -842,6 +975,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "ln") == 0){
             link(pathname);
+        }
+        else if(strcmp(cmd, "unlink") == 0){
+            unlink(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
