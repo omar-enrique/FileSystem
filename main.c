@@ -346,7 +346,7 @@ int my_mkdir(char *pathname) {
     newDP->name[0] = newDP->name[1] = '.';
     put_block(dev, blk, buf);
 
-    enter_name(parentmip, ino, base);
+    enter_name(parentmip, ino, base, EXT2_FT_DIR);
 
     return 1;
 }
@@ -408,12 +408,12 @@ int my_creat(char *pathname){
     mip->dirty = 1;
     iput(mip);
     
-    enter_name(parentmip, ino, base);
+    enter_name(parentmip, ino, base, EXT2_FT_REG_FILE);
 
     return 1;
 }
 
-int enter_name(MINODE *mip, int myino, char *myname)
+int enter_name(MINODE *mip, int myino, char *myname, int fileType)
 {
     int i;
     INODE *parent_ip = &mip->INODE;
@@ -472,7 +472,7 @@ int enter_name(MINODE *mip, int myino, char *myname)
             newDP->rec_len = block_size - ((u32)cp - (u32)buf);
             printf("rec len is %d\n", newDP->rec_len);
             newDP->name_len = strlen(myname);
-            newDP->file_type = EXT2_FT_DIR;
+            newDP->file_type = fileType;
             strcpy(newDP->name, myname);
 
             put_block(dev, bno, buf);
@@ -688,6 +688,111 @@ int my_cat(char *pathname) {
     return 0;
 }
 
+void link(char *path)
+{
+    char source[64], destination[64], temp[64];
+    char link_parent[64], link_child[64];
+    int ino;
+    int p_ino;
+    MINODE *mip;   //miniode pointer
+    MINODE *p_mip; //another minode pointer
+    INODE *ip;     //inode pointer
+    INODE *p_ip;   //another inode pointer
+
+    //Checks
+    if (!strcmp(path, ""))
+    {
+        printf("No source file!\n");
+        return;
+    }
+
+    if (!strcmp(three, ""))
+    {
+        printf("No new file!\n");
+        return;
+    }
+
+    strcpy(source, path); //make some copies
+    strcpy(destination, three);
+
+    //get sourcefilename's inode
+    ino = getino(source);
+    mip = iget(dev, ino);
+
+    //verify source file exists
+    if (!mip)
+    {
+        printf("ERROR: %s does not exist!\n", source);
+        return;
+    }
+    //Verify it is a file
+    if (S_ISDIR(mip->INODE.i_mode))
+    {
+        printf("ERROR: Can't link a directory!\n");
+        return;
+    }
+
+    //get destination's dirname
+    if (!strcmp(destination, "/"))
+    {
+        strcpy(link_parent, "/");
+    }
+    else
+    {
+        strcpy(temp, destination);
+        strcpy(link_parent, dirname(temp));
+    }
+
+    //get destination's basename
+    strcpy(temp, destination);
+    strcpy(link_child, basename(temp));
+
+    //get new's parent
+    p_ino = getino(link_parent);
+    p_mip = iget(dev, p_ino);
+
+    //verify that link parent exists
+    if (!p_mip)
+    {
+        printf("No parent!\n");
+        return;
+    }
+
+    //verify link parent is a directory
+    if (!S_ISDIR(p_mip->INODE.i_mode))
+    {
+        printf("Not a directory\n");
+        return;
+    }
+
+    //verify that link child does not exist yet
+    if (getino(destination) != -1)
+    {
+        printf("%s already exists\n", destination);
+        return;
+    }
+
+    //enter the name for the newfile into the parent dir
+    printf("Entering name for %s\n", link_child);
+
+    //this ino is the ino of the source file
+    enter_name(p_mip, ino, link_child, EXT2_FT_REG_FILE);
+
+    ip = &mip->INODE;
+
+    //increment the link count cuz this is a link.. cuz!
+    ip->i_links_count++;
+    
+    mip->dirty = 1;
+    p_ip = &p_mip->INODE;
+    p_ip->i_atime = time(0L);
+    p_mip->dirty = 1;
+
+    iput(p_mip);
+    iput(mip);
+    return;
+}
+
 int quit() {
     for(int i = 0; i < NMINODE; i++) {
         MINODE *mip = &minode[i];
@@ -715,7 +820,7 @@ int main(int argc, char *argv[]) {
         line[strlen(line) - 1] = 0;
         if(line[0] == 0)
             continue;
-        sscanf(line, "%s %s", cmd, pathname);
+        sscanf(line, "%s %s %s", cmd, pathname, three);
 
         if(strcmp(cmd, "cd") == 0) {
             ch_dir(pathname);
@@ -724,7 +829,7 @@ int main(int argc, char *argv[]) {
             ls(pathname);
         }
         else if(strcmp(cmd, "pwd") == 0) {
-            pwd(running->cwd);
+            pwd(cwd);
         }
         else if(strcmp(cmd, "cat") == 0) {
             my_cat(pathname);
@@ -734,6 +839,9 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "creat") == 0){
             my_creat(pathname);
+        }
+        else if(strcmp(cmd, "ln") == 0){
+            link(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
