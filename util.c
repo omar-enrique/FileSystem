@@ -5,6 +5,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "type.h"
 

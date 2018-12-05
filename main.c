@@ -1064,6 +1064,70 @@ int symlink(char *pathname)
     return 0;
 }
 
+int my_stat(char *pathname) // (char *pathname, struct stat *stPtr)
+{
+	char path[strlen(pathname) + 1];
+	strcpy(path, pathname);
+
+	MINODE *mip;
+    INODE *ip;
+    
+    if (pathname == NULL)
+    {
+        printf("Please pass in a filename\n");
+        return -1;
+    }
+	int ino = getino(pathname);
+	if(ino == -1)
+	{
+		printf("Could not find file\n");
+		return -1;
+	}
+	mip = iget(dev, ino);
+    
+	char *base = basename(path);
+
+	printf("\n  File: '%s'", base);     // dirname
+    printf("\n  Size: %d", mip->INODE.i_size);       
+    printf("\n  Blocks: %d", mip->INODE.i_blocks);
+    printf("\n  IO Block: %d", BLKSIZE);
+    printf("\n  Type: ");
+    printf((mip->INODE.i_mode & 0x4000) ? "Dir " : "");
+    printf((mip->INODE.i_mode & 0x8000) == 0x8000 ? "Reg " : "");
+    printf((mip->INODE.i_mode & 0xA000) == 0xA000 ? "Sym " : "");
+
+    printf("\n  Dev: %d", mip->dev);        //
+	printf("\n  Ino: %lu", mip->ino);            // %ld", (long) dir->ino);
+	printf("\n  Links: %d", mip->INODE.i_links_count);          // %ld", (long) sb.st_nlink);
+
+    printf("\n  Permisions: ");
+    printf((mip->INODE.i_mode & 0x0100) ? "r" : "-");
+    printf((mip->INODE.i_mode & 0x0080) ? "w" : "-");
+    printf((mip->INODE.i_mode & 0x0040) ? "x" : "-");
+    printf((mip->INODE.i_mode & 0x0020) ? "r" : "-");
+    printf((mip->INODE.i_mode & 0x0010) ? "w" : "-");
+    printf((mip->INODE.i_mode & 0x0008) ? "x" : "-");
+    printf((mip->INODE.i_mode & 0x0004) ? "r" : "-");
+    printf((mip->INODE.i_mode & 0x0002) ? "w" : "-");
+    printf((mip->INODE.i_mode & 0x0001) ? "x" : "-");
+    printf("\n  Uid: %d", mip->INODE.i_uid); 
+    printf("\n  Gid: %d", mip->INODE.i_gid);
+
+    ip = &mip->INODE;
+
+    char * atime = ctime(&ip->i_atime);
+    char * mtime = ctime(&ip->i_mtime);
+    char * chtime = ctime(&ip->i_ctime);
+
+    printf("\n  Access: %s", ctime(atime));
+    printf("\n  Modify: %s", ctime(mtime));
+    printf("\n  Change: %s", ctime(chtime));
+
+    iput(mip);
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if(argc > 1) 
         disk = argv[1];
@@ -1117,6 +1181,9 @@ int main(int argc, char *argv[]) {
         else if(strcmp(cmd, "mv") == 0) {
             printf("CMD: %s, PATH: %s, DEST: %s", cmd, pathname, three);
             my_mv(pathname, three);
+        }
+        else if(strcmp(cmd, "stat") == 0){
+            my_stat(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
