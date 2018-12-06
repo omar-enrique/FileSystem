@@ -133,7 +133,7 @@ int ls(char *pathname) {
     MINODE *mip;
     int ino = 0;
     if(strlen(pathname) < 1) {
-        printf("Directory / entries: \n", pathname);
+        printf("Directory %s entries: \n", pathname);
         ino = running->cwd->ino;
     }
     else {
@@ -350,6 +350,72 @@ int my_mkdir(char *pathname) {
 
     return 1;
 }
+
+int touch(char *pathname){
+
+    MINODE *mip;
+    INODE *ip;
+
+    int ino = getino(pathname);
+	if(ino == -1)
+	{
+		return my_creat(pathname);
+	}
+
+	mip = iget(dev, ino);
+
+    mip->INODE.i_atime = mip->INODE.i_mtime = time(0);
+    
+    mip->dirty = 1;
+    
+    iput(mip);
+
+    return 1;
+}
+
+int my_chmod(char *pathname)
+{
+    char *mod = pathname;
+	if(mod == NULL && *mod > '0')
+	{
+		printf("Please include both a mod and pathname.\n");
+		return -1;
+	}
+
+	char *path = three;
+	if(path == NULL)
+	{
+		printf("Please include both a mod and pathname.\n");
+		return -1;
+	}
+
+	int ino = getino(path);
+	if(ino == -1)
+	{
+		printf("Path does not exist.\n");
+		return -1;
+	}
+
+	MINODE *mip = iget(dev, ino);
+
+	int m = strtol(mod, 0, 8);
+	for(int i = 0; i < 9; ++i)
+	{
+		if(m & (1 << i))
+			mip->INODE.i_mode |= ( 1 << i);
+		else
+			mip->INODE.i_mode &= ~(1 << i); 
+	}
+
+	mip->INODE.i_atime = mip->INODE.i_mtime = time(0);
+	mip->dirty = 1;
+
+    iput(mip);
+
+    return 0;
+
+}
+
 
 int my_creat(char *pathname){
 
@@ -1096,9 +1162,9 @@ int my_stat(char *pathname) // (char *pathname, struct stat *stPtr)
     printf((mip->INODE.i_mode & 0x8000) == 0x8000 ? "Reg " : "");
     printf((mip->INODE.i_mode & 0xA000) == 0xA000 ? "Sym " : "");
 
-    printf("\n  Dev: %d", mip->dev);        //
-	printf("\n  Ino: %lu", mip->ino);            // %ld", (long) dir->ino);
-	printf("\n  Links: %d", mip->INODE.i_links_count);          // %ld", (long) sb.st_nlink);
+    printf("\n  Dev: %d", mip->dev);       
+	printf("\n  Ino: %lu", mip->ino);
+	printf("\n  Links: %d", mip->INODE.i_links_count);
 
     printf("\n  Permisions: ");
     printf((mip->INODE.i_mode & 0x0100) ? "r" : "-");
@@ -1184,6 +1250,12 @@ int main(int argc, char *argv[]) {
         }
         else if(strcmp(cmd, "stat") == 0){
             my_stat(pathname);
+        }
+        else if(strcmp(cmd, "touch") == 0){
+            touch(pathname);
+        }
+        else if(strcmp(cmd, "chmod") == 0){
+            my_chmod(pathname);
         }
         else if(strcmp(cmd, "quit") == 0) {
             quit();
