@@ -353,11 +353,6 @@ int getino(char *pathname)
     return ino;
 }
 
-
-
-// THESE two functions are for pwd(running->cwd), which prints the absolute
-// pathname of CWD. 
-
 int findmyname(MINODE *mip, int ino, char *filename) 
 {
    int i = 0;
